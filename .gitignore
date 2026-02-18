@@ -1,4 +1,16 @@
 token.json
 processed_ids.txt
+wa_processed_ids.txt
 __pycache__/
 *.pyc
+.wa_session/
+.orchestrator_state.json
+.hitl_state.json
+orchestrator.log
+hitl_watcher.log
+pm2-*.log
+linkedin-mcp-server/node_modules/
+linkedin-mcp-server/.li_session/
+linkedin-mcp-server/schedule.json
+linkedin-mcp-server/mcp-server.log
+linkedin-mcp-server/test-results.log

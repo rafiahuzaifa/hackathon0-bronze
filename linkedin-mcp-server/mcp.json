@@ -1,0 +1,25 @@
+{
+  "mcpServers": {
+    "linkedin-poster": {
+      "command": "node",
+      "args": ["d:/hackathon0/hackathon/AI_Employee_Vault/linkedin-mcp-server/server.js"],
+      "env": {
+        "DRY_RUN": "true"
+      },
+      "metadata": {
+        "name": "LinkedIn Poster",
+        "description": "MCP server for drafting, approving, and posting LinkedIn content. Reads Business_Goals.md for strategy context. All posts go through /Pending_Approval for human review.",
+        "version": "1.0.0",
+        "tools": [
+          "draft_post",
+          "list_drafts",
+          "approve_draft",
+          "reject_draft",
+          "schedule_post",
+          "get_goals",
+          "submit_post"
+        ]
+      }
+    }
+  }
+}
