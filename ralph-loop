@@ -1,0 +1,251 @@
+#!/usr/bin/env bash
+#
+# ralph-loop — Ralph Wiggum Stop-Hook for Claude Code
+#
+# Intercepts task completion, checks if task files are in /Done,
+# re-injects prompt with previous output if not.
+#
+# Usage:
+#   ./ralph-loop                           # Process all tasks in /Needs_Action
+#   ./ralph-loop --inbox /path/to/inbox    # Custom inbox
+#   ./ralph-loop --max-iter 5              # Max iterations (default: 10)
+#   ./ralph-loop --dry-run                 # Preview without moving files
+#   ./ralph-loop --test                    # Run simulation tests
+#   ./ralph-loop --hook                    # Run as Claude Code stop-hook
+#
+# Exit codes:
+#   0 = all tasks complete
+#   1 = tasks remaining after max iterations
+#   2 = no tasks found
+#   3 = error
+
+set -euo pipefail
+
+VAULT_DIR="d:/hackathon0/hackathon/AI_Employee_Vault"
+INBOX="${VAULT_DIR}/Needs_Action"
+DONE_DIR="${VAULT_DIR}/Tasks/Done"
+STATE_FILE="${VAULT_DIR}/.ralph_state.json"
+LOG_FILE="${VAULT_DIR}/ralph_wiggum.log"
+MAX_ITERATIONS=10
+DRY_RUN=false
+HOOK_MODE=false
+ITERATION=0
+
+# Color output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+log() {
+    local level="$1"
+    shift
+    local msg="$*"
+    local ts
+    ts=$(date '+%Y-%m-%d %H:%M:%S')
+    echo -e "[${ts}] [${level}] ${msg}" | tee -a "${LOG_FILE}"
+}
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --inbox)    INBOX="$2"; shift 2 ;;
+        --max-iter) MAX_ITERATIONS="$2"; shift 2 ;;
+        --dry-run)  DRY_RUN=true; shift ;;
+        --hook)     HOOK_MODE=true; shift ;;
+        --test)
+            # Delegate to Python test suite
+            python "${VAULT_DIR}/ralph_wiggum.py" --test
+            exit $?
+            ;;
+        *) shift ;;
+    esac
+done
+
+# Ensure directories exist
+mkdir -p "${INBOX}" "${DONE_DIR}"
+
+# ---------------------------------------------------------------------------
+# Count pending tasks
+# ---------------------------------------------------------------------------
+count_pending() {
+    local count
+    count=$(find "${INBOX}" -maxdepth 1 -name "*.md" 2>/dev/null | wc -l)
+    echo "${count}"
+}
+
+count_done() {
+    local count
+    count=$(find "${DONE_DIR}" -maxdepth 1 -name "*.md" 2>/dev/null | wc -l)
+    echo "${count}"
+}
+
+# ---------------------------------------------------------------------------
+# Check if ALL tracked tasks are in /Done
+# ---------------------------------------------------------------------------
+all_tasks_done() {
+    local pending
+    pending=$(count_pending)
+    [[ "${pending}" -eq 0 ]]
+}
+
+# ---------------------------------------------------------------------------
+# Process a single task file
+# ---------------------------------------------------------------------------
+process_file() {
+    local filepath="$1"
+    local filename
+    filename=$(basename "${filepath}")
+
+    log "INFO" "  Processing: ${filename}"
+
+    if [[ "${DRY_RUN}" == "true" ]]; then
+        log "INFO" "    [DRY RUN] Would move ${filename} to /Tasks/Done/"
+        return 0
+    fi
+
+    # Check if file has YAML frontmatter with status
+    if head -1 "${filepath}" | grep -q "^---"; then
+        # Update status to done using sed
+        sed -i 's/status: *pending/status: done/' "${filepath}"
+        sed -i 's/status: *in_progress/status: done/' "${filepath}"
+
+        # Add processed timestamp if not present
+        if ! grep -q "processed_at:" "${filepath}"; then
+            local ts
+            ts=$(date -Iseconds)
+            sed -i "/^---$/a processed_at: ${ts}" "${filepath}"
+        fi
+    fi
+
+    # Move to /Done
+    mv "${filepath}" "${DONE_DIR}/${filename}"
+    log "INFO" "    Moved to /Tasks/Done/${filename}"
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# Main Loop
+# ---------------------------------------------------------------------------
+main_loop() {
+    log "INFO" "$(printf '=%.0s' {1..60})"
+    log "INFO" "RALPH WIGGUM LOOP — START (bash driver)"
+    log "INFO" "  Inbox: ${INBOX}"
+    log "INFO" "  Done: ${DONE_DIR}"
+    log "INFO" "  Max iterations: ${MAX_ITERATIONS}"
+    log "INFO" "  Dry run: ${DRY_RUN}"
+    log "INFO" "$(printf '=%.0s' {1..60})"
+
+    local total_processed=0
+
+    for ((ITERATION=1; ITERATION<=MAX_ITERATIONS; ITERATION++)); do
+        log "INFO" ""
+        log "INFO" "--- Iteration #${ITERATION}/${MAX_ITERATIONS} ---"
+
+        local pending
+        pending=$(count_pending)
+        local done
+        done=$(count_done)
+
+        log "INFO" "  Pending: ${pending} | Done: ${done}"
+
+        if [[ "${pending}" -eq 0 ]]; then
+            if [[ "${total_processed}" -gt 0 ]]; then
+                log "INFO" "  ${GREEN}All tasks complete!${NC}"
+                break
+            else
+                log "INFO" "  No tasks found in inbox."
+                return 2
+            fi
+        fi
+
+        # Process each pending file
+        local processed=0
+        for filepath in "${INBOX}"/*.md; do
+            [[ -f "${filepath}" ]] || continue
+
+            if process_file "${filepath}"; then
+                ((processed++))
+                ((total_processed++))
+            fi
+        done
+
+        log "INFO" "  Processed ${processed} task(s) this iteration"
+
+        # Check completion
+        if all_tasks_done; then
+            log "INFO" "  ${GREEN}All tasks done after iteration #${ITERATION}${NC}"
+            break
+        fi
+
+        # Not done — log re-injection
+        local remaining
+        remaining=$(count_pending)
+        log "WARN" "  ${remaining} task(s) remaining — re-injecting for next iteration"
+    done
+
+    # Final summary
+    local final_pending
+    final_pending=$(count_pending)
+    local final_done
+    final_done=$(count_done)
+
+    log "INFO" ""
+    log "INFO" "$(printf '=%.0s' {1..60})"
+    log "INFO" "RALPH WIGGUM LOOP — COMPLETE"
+    log "INFO" "  Iterations: ${ITERATION}/${MAX_ITERATIONS}"
+    log "INFO" "  Total processed: ${total_processed}"
+    log "INFO" "  Remaining: ${final_pending}"
+
+    if [[ "${final_pending}" -eq 0 ]]; then
+        log "INFO" "  ${GREEN}SUCCESS: All tasks in /Done${NC}"
+        log "INFO" "$(printf '=%.0s' {1..60})"
+        return 0
+    else
+        log "WARN" "  ${RED}INCOMPLETE: ${final_pending} tasks remaining${NC}"
+        log "INFO" "$(printf '=%.0s' {1..60})"
+        return 1
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Hook Mode: Claude Code stop-hook integration
+# ---------------------------------------------------------------------------
+hook_mode() {
+    # Called by Claude Code as a stop hook
+    # Reads stdin for the previous output, checks completion, re-injects if needed
+
+    local previous_output=""
+    if [[ ! -t 0 ]]; then
+        previous_output=$(cat)
+    fi
+
+    local pending
+    pending=$(count_pending)
+
+    if [[ "${pending}" -eq 0 ]]; then
+        # All done — allow exit
+        echo '{"action": "allow", "reason": "All tasks in /Done"}'
+        exit 0
+    fi
+
+    # Not done — re-inject
+    local prompt
+    prompt="Ralph Wiggum re-injection: ${pending} task(s) still in ${INBOX}. "
+    prompt+="Process remaining .md files and move to /Tasks/Done/ when complete. "
+    prompt+="Previous output available in context."
+
+    echo "{\"action\": \"reinject\", \"prompt\": \"${prompt}\", \"pending\": ${pending}}"
+    exit 1
+}
+
+# ---------------------------------------------------------------------------
+# Entry Point
+# ---------------------------------------------------------------------------
+if [[ "${HOOK_MODE}" == "true" ]]; then
+    hook_mode
+else
+    main_loop
+    exit $?
+fi

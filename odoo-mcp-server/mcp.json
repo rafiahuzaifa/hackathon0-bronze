@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "odoo-accounting": {
+      "command": "node",
+      "args": [
+        "d:/hackathon0/hackathon/AI_Employee_Vault/odoo-mcp-server/server.js"
+      ],
+      "env": {
+        "ODOO_URL": "http://localhost:8069",
+        "ODOO_DB": "odoo",
+        "ODOO_USER": "admin",
+        "ODOO_PASSWORD": "admin",
+        "ODOO_SIMULATE": "true"
+      }
+    }
+  }
+}

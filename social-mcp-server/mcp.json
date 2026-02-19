@@ -1,0 +1,23 @@
+{
+  "mcpServers": {
+    "social-media": {
+      "command": "node",
+      "args": [
+        "d:/hackathon0/hackathon/AI_Employee_Vault/social-mcp-server/server.js"
+      ],
+      "env": {
+        "SOCIAL_SIMULATE": "true",
+        "DRY_RUN": "true",
+        "TWITTER_BEARER_TOKEN": "",
+        "TWITTER_API_KEY": "",
+        "TWITTER_API_SECRET": "",
+        "TWITTER_ACCESS_TOKEN": "",
+        "TWITTER_ACCESS_SECRET": "",
+        "FACEBOOK_PAGE_TOKEN": "",
+        "FACEBOOK_PAGE_ID": "",
+        "INSTAGRAM_ACCESS_TOKEN": "",
+        "INSTAGRAM_BUSINESS_ID": ""
+      }
+    }
+  }
+}

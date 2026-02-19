@@ -1,0 +1,31 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Task",
+        "command": "python d:/hackathon0/hackathon/AI_Employee_Vault/ralph_wiggum.py --dry-run --max-iter 1 2>/dev/null || true"
+      }
+    ],
+    "Stop": [
+      {
+        "command": "bash d:/hackathon0/hackathon/AI_Employee_Vault/ralph-loop --hook"
+      }
+    ]
+  },
+  "ralph_wiggum": {
+    "description": "Ralph Wiggum Stop-Hook — intercepts exit, checks /Tasks/Done, re-injects if incomplete",
+    "max_iterations": 10,
+    "inbox": "d:/hackathon0/hackathon/AI_Employee_Vault/Needs_Action",
+    "done_dir": "d:/hackathon0/hackathon/AI_Employee_Vault/Tasks/Done",
+    "completion_detection": [
+      "file_movement: inbox -> /Tasks/Done",
+      "yaml_frontmatter: status: done|completed|closed",
+      "sentinel_file: .ralph_complete"
+    ],
+    "integration": {
+      "bash_script": "ralph-loop",
+      "python_engine": "ralph_wiggum.py",
+      "state_file": ".ralph_state.json"
+    }
+  }
+}
