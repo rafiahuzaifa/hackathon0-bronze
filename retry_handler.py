@@ -55,27 +55,28 @@ DEFAULT_JITTER = 0.5          # random jitter factor (0-1)
 # Error Classification
 # ---------------------------------------------------------------------------
 # Maps exception types → error categories
-EXCEPTION_CATEGORY_MAP = {
-    # Transient
-    ConnectionError: ErrorCategory.TRANSIENT,
-    TimeoutError: ErrorCategory.TRANSIENT,
-    ConnectionResetError: ErrorCategory.TRANSIENT,
-    BrokenPipeError: ErrorCategory.TRANSIENT,
-    OSError: ErrorCategory.TRANSIENT,  # includes network errors
-
+EXCEPTION_CATEGORY_MAP = [
+    # Order matters: more specific types first (PermissionError is subclass of OSError)
     # Auth
-    PermissionError: ErrorCategory.AUTH,
-
-    # Logic
-    ValueError: ErrorCategory.LOGIC,
-    TypeError: ErrorCategory.LOGIC,
-    KeyError: ErrorCategory.LOGIC,
-    AttributeError: ErrorCategory.LOGIC,
+    (PermissionError, ErrorCategory.AUTH),
 
     # System
-    MemoryError: ErrorCategory.SYSTEM,
-    SystemError: ErrorCategory.SYSTEM,
-}
+    (MemoryError, ErrorCategory.SYSTEM),
+    (SystemError, ErrorCategory.SYSTEM),
+
+    # Transient (specific before generic OSError)
+    (ConnectionError, ErrorCategory.TRANSIENT),
+    (TimeoutError, ErrorCategory.TRANSIENT),
+    (ConnectionResetError, ErrorCategory.TRANSIENT),
+    (BrokenPipeError, ErrorCategory.TRANSIENT),
+    (OSError, ErrorCategory.TRANSIENT),
+
+    # Logic
+    (ValueError, ErrorCategory.LOGIC),
+    (TypeError, ErrorCategory.LOGIC),
+    (KeyError, ErrorCategory.LOGIC),
+    (AttributeError, ErrorCategory.LOGIC),
+]
 
 # String patterns in error messages → categories
 ERROR_MESSAGE_PATTERNS = {
@@ -109,8 +110,8 @@ def classify_error(error: Exception) -> str:
       2. Error message pattern matching
       3. Default to LOGIC
     """
-    # Check exception type
-    for exc_type, category in EXCEPTION_CATEGORY_MAP.items():
+    # Check exception type (ordered list — specific types first)
+    for exc_type, category in EXCEPTION_CATEGORY_MAP:
         if isinstance(error, exc_type):
             return category
 
@@ -600,6 +601,11 @@ def run_tests():
     """Simulate 3 error types and recover — Ralph Wiggum loop."""
     import shutil
     import tempfile
+
+    # Fix Windows console encoding
+    if sys.platform == "win32":
+        import io
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
     MAX_ATTEMPTS = 3
     success = False

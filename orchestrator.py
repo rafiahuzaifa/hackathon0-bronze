@@ -30,6 +30,10 @@ from typing import Optional
 import yaml
 import schedule
 
+# Error handling & audit logging
+from audit_logger import AuditLogger, ErrorCategory
+from retry_handler import ErrorHandler, retry, classify_error
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -69,6 +73,10 @@ logger.addHandler(console_handler)
 # Suppress noisy libs
 logging.getLogger("googleapiclient.discovery_cache").setLevel(logging.ERROR)
 logging.getLogger("urllib3").setLevel(logging.WARNING)
+
+# Error handling
+error_handler = ErrorHandler(component="orchestrator")
+audit = AuditLogger(component="orchestrator")
 
 
 # ---------------------------------------------------------------------------
@@ -320,30 +328,37 @@ def update_dashboard(stats: dict, cycle: int):
 # Gmail Watcher Integration
 # ---------------------------------------------------------------------------
 def run_gmail_watcher() -> dict:
-    """Run the existing gmail_watcher.py and return stats."""
+    """Run the existing gmail_watcher.py with retry + circuit breaker."""
     stats = {"new": 0, "status": "ok"}
-    try:
-        # Count files before
-        before = set(f.name for f in NEEDS_ACTION_DIR.iterdir() if f.suffix == ".md")
 
-        # Import and run gmail_watcher
+    def _fetch():
+        before = set(f.name for f in NEEDS_ACTION_DIR.iterdir() if f.suffix == ".md")
         sys.path.insert(0, str(VAULT_DIR))
         import gmail_watcher
         gmail_watcher.fetch_unread_emails()
-
-        # Count files after
         after = set(f.name for f in NEEDS_ACTION_DIR.iterdir() if f.suffix == ".md")
-        new_files = after - before
-        stats["new"] = len(new_files)
-        if new_files:
-            logger.info(f"Gmail watcher: {len(new_files)} new emails")
-        else:
-            logger.info("Gmail watcher: no new emails")
+        return after - before
 
-    except Exception as e:
-        logger.error(f"Gmail watcher error: {e}")
+    def _queue_fallback(e):
+        audit.transient(f"Gmail API down, queueing: {e}", event="gmail_queued")
+        error_handler.enqueue_task("gmail_fetch", "gmail", {}, reason=str(e))
+        return set()
+
+    ok, new_files, err = error_handler.safe_execute(
+        fn=_fetch,
+        fallback=_queue_fallback,
+        max_retries=3,
+        circuit_name="gmail_api",
+    )
+
+    if ok and new_files:
+        stats["new"] = len(new_files)
+        audit.info(f"Gmail: {len(new_files)} new emails", event="gmail_fetch_ok")
+    elif err:
         stats["status"] = "error"
-        stats["error"] = str(e)
+        stats["error"] = str(err)
+        audit.error(f"Gmail watcher failed: {err}", event="gmail_fetch_fail",
+                    category=classify_error(err))
 
     return stats
 
@@ -352,15 +367,29 @@ def run_gmail_watcher() -> dict:
 # WhatsApp Watcher Integration
 # ---------------------------------------------------------------------------
 def run_whatsapp_watcher(simulate: bool = False) -> dict:
-    """Run the WhatsApp watcher and return stats."""
-    try:
+    """Run the WhatsApp watcher with retry + graceful degradation."""
+    def _run_wa():
         from whatsapp_watcher import run_whatsapp_watcher as wa_run, simulate_whatsapp_messages
         if simulate:
             return simulate_whatsapp_messages()
         return wa_run()
-    except Exception as e:
-        logger.error(f"WhatsApp watcher error: {e}")
+
+    def _queue_fallback(e):
+        audit.transient(f"WhatsApp down, queueing: {e}", event="wa_queued")
+        error_handler.enqueue_task("wa_fetch", "whatsapp", {"simulate": simulate}, reason=str(e))
         return {"status": "error", "new_messages": 0, "urgent": 0, "errors": [str(e)]}
+
+    ok, result, err = error_handler.safe_execute(
+        fn=_run_wa,
+        fallback=_queue_fallback,
+        max_retries=2,
+        circuit_name="whatsapp",
+    )
+
+    if ok:
+        audit.info(f"WhatsApp: {result.get('new_messages', 0)} msgs", event="wa_fetch_ok")
+        return result
+    return result if result else {"status": "error", "new_messages": 0, "urgent": 0, "errors": [str(err)]}
 
 
 # ---------------------------------------------------------------------------
@@ -493,11 +522,24 @@ def run_cycle(state: OrchestratorState, simulate: bool = False) -> dict:
     logger.info("[6/6] Updating Dashboard.md...")
     update_dashboard(stats, cycle)
 
+    # Step 6b: Process queued tasks (graceful degradation recovery)
+    queue_stats = error_handler.process_queued(lambda t: logger.info(f"  Re-processing queued task: {t['id']}"))
+    if queue_stats["processed"] > 0:
+        logger.info(f"  Queue: {queue_stats['processed']} recovered, {queue_stats['dead_letter']} dead-lettered")
+        audit.info(f"Queue drain: {queue_stats}", event="queue_processed", data=queue_stats)
+
     # Run any pending scheduled tasks
     schedule.run_pending()
 
     # Save state
     state.save()
+
+    # Audit trail for cycle
+    audit.audit(
+        f"Cycle #{cycle} complete",
+        event="cycle_complete",
+        data={k: v for k, v in stats.items() if k != "errors"},
+    )
 
     logger.info(f"CYCLE #{cycle} COMPLETE — "
                 f"Gmail: +{stats['gmail_new']} | "
