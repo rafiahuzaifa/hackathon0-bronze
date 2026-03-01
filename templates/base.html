@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>{% block title %}AI Employee Vault{% endblock %}</title>
+  <style>
+    :root {
+      --bg:      #0f1117;
+      --surface: #1a1d27;
+      --card:    #22263a;
+      --border:  #2e3250;
+      --accent:  #5865f2;
+      --green:   #2ecc71;
+      --red:     #e74c3c;
+      --amber:   #f39c12;
+      --text:    #e8eaf6;
+      --muted:   #8892b0;
+      --mono:    'Fira Code', 'Consolas', monospace;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; font-size: 14px; line-height: 1.6; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* Nav */
+    nav {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0 24px;
+      display: flex; align-items: center; justify-content: space-between;
+      height: 52px;
+    }
+    .nav-brand { font-weight: 700; font-size: 15px; letter-spacing: .5px; color: var(--text); }
+    .nav-brand span { color: var(--accent); }
+    .nav-links { display: flex; gap: 16px; align-items: center; }
+    .nav-links a { color: var(--muted); font-size: 13px; }
+    .nav-links a:hover { color: var(--text); text-decoration: none; }
+    .badge {
+      background: var(--accent); color: #fff;
+      padding: 1px 7px; border-radius: 10px; font-size: 11px; font-weight: 600;
+    }
+
+    /* Layout */
+    .container { max-width: 1100px; margin: 0 auto; padding: 24px 16px; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    @media(max-width:700px){ .grid2 { grid-template-columns: 1fr; } }
+
+    /* Cards */
+    .card {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 10px; padding: 20px;
+    }
+    .card-title {
+      font-size: 12px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 1px; color: var(--muted); margin-bottom: 14px;
+      display: flex; align-items: center; gap: 8px;
+    }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 6px 14px; border-radius: 6px; font-size: 13px;
+      font-weight: 600; cursor: pointer; border: none; transition: opacity .15s;
+    }
+    .btn:hover { opacity: .85; }
+    .btn-approve { background: var(--green);  color: #fff; }
+    .btn-reject  { background: var(--red);    color: #fff; }
+    .btn-audit   { background: var(--accent); color: #fff; }
+    .btn-sm { padding: 4px 10px; font-size: 12px; }
+
+    /* Flash messages */
+    .flashes { list-style: none; margin-bottom: 16px; }
+    .flashes li {
+      padding: 10px 14px; border-radius: 6px; margin-bottom: 6px; font-size: 13px;
+    }
+    .flashes .success { background: rgba(46,204,113,.15); border: 1px solid var(--green); color: var(--green); }
+    .flashes .error   { background: rgba(231,76,60,.15);  border: 1px solid var(--red);   color: var(--red); }
+
+    /* Dashboard MD */
+    .md-body h1,h2,h3 { color: var(--text); margin: 14px 0 8px; }
+    .md-body h1 { font-size: 20px; }
+    .md-body h2 { font-size: 16px; border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+    .md-body table { border-collapse: collapse; width: 100%; font-size: 13px; margin: 10px 0; }
+    .md-body th { background: var(--border); color: var(--muted); padding: 6px 10px; text-align: left; }
+    .md-body td { padding: 5px 10px; border-bottom: 1px solid var(--border); }
+    .md-body ul,ol { padding-left: 20px; margin: 6px 0; }
+    .md-body code { background: var(--border); padding: 1px 5px; border-radius: 3px; font-family: var(--mono); }
+    .md-body pre  { background: var(--border); padding: 10px; border-radius: 6px; overflow-x: auto; }
+    .md-body strong { color: var(--amber); }
+
+    /* Pending items */
+    .pending-item {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; padding: 14px; margin-bottom: 10px;
+      display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;
+    }
+    .pending-item:hover { border-color: var(--accent); }
+    .pending-meta { flex: 1; min-width: 0; }
+    .pending-meta .name { font-weight: 600; font-size: 13px; margin-bottom: 3px; }
+    .pending-meta .body { color: var(--muted); font-size: 12px; white-space: pre-wrap; word-break: break-word; }
+    .pill {
+      display: inline-block; padding: 2px 8px; border-radius: 10px;
+      font-size: 11px; font-weight: 600; text-transform: uppercase; margin-right: 4px;
+    }
+    .pill-payment  { background: rgba(243,156,18,.2);  color: var(--amber); }
+    .pill-linkedin { background: rgba(88,101,242,.2);  color: var(--accent); }
+    .pill-social   { background: rgba(46,204,113,.2);  color: var(--green); }
+    .pill-item     { background: rgba(136,146,176,.2); color: var(--muted); }
+    .pending-actions { display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; }
+
+    /* Activity log */
+    .event-row { display: flex; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+    .event-row:last-child { border-bottom: none; }
+    .event-ts   { color: var(--muted); flex-shrink: 0; }
+    .event-ok   { color: var(--green); }
+    .event-fail { color: var(--red); }
+
+    /* Stat chips */
+    .stats { display: flex; gap: 12px; margin-bottom: 18px; flex-wrap: wrap; }
+    .stat { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 16px; text-align: center; }
+    .stat-num { font-size: 22px; font-weight: 700; color: var(--accent); }
+    .stat-lbl { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+
+    /* Audit modal */
+    #audit-output {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+      padding: 12px; font-family: var(--mono); font-size: 12px;
+      white-space: pre-wrap; word-break: break-all; max-height: 300px; overflow-y: auto;
+      margin-top: 10px; display: none;
+    }
+    .spinner { display:inline-block; width:14px; height:14px; border:2px solid #fff;
+      border-top-color: transparent; border-radius: 50%; animation: spin .6s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+<nav>
+  <span class="nav-brand">&#x1F916; <span>AI Employee</span> Vault</span>
+  <div class="nav-links">
+    <a href="{{ url_for('dashboard') }}">Dashboard</a>
+    <a href="{{ url_for('api_events') }}">Events API</a>
+    <a href="{{ url_for('health') }}">Health</a>
+    <a href="{{ url_for('logout') }}">Logout</a>
+  </div>
+</nav>
+<div class="container">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      <ul class="flashes">
+        {% for cat, msg in messages %}
+          <li class="{{ cat }}">{{ msg }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  {% endwith %}
+  {% block content %}{% endblock %}
+</div>
+<script>
+// Generic AJAX form helper
+function ajaxPost(url, onDone) {
+  fetch(url, {
+    method: 'POST',
+    headers: { 'X-Requested-With': 'XMLHttpRequest' }
+  }).then(r => r.json()).then(onDone).catch(e => console.error(e));
+}
+
+// Remove pending item from DOM
+function removePending(filename) {
+  const el = document.querySelector('[data-file="' + CSS.escape(filename) + '"]');
+  if (el) { el.style.transition = 'opacity .3s'; el.style.opacity = 0; setTimeout(() => el.remove(), 300); }
+  // update count badge
+  const badge = document.getElementById('pending-count');
+  if (badge) { const n = parseInt(badge.textContent) - 1; badge.textContent = n >= 0 ? n : 0; }
+}
+
+function approve(filename) {
+  ajaxPost('/approve/' + encodeURIComponent(filename), function(r) {
+    showToast(r.ok ? 'Approved: ' + filename : 'Error: ' + r.msg, r.ok ? 'success' : 'error');
+    if (r.ok) removePending(filename);
+  });
+}
+
+function reject(filename) {
+  ajaxPost('/reject/' + encodeURIComponent(filename), function(r) {
+    showToast(r.ok ? 'Rejected: ' + filename : 'Error: ' + r.msg, r.ok ? 'success' : 'error');
+    if (r.ok) removePending(filename);
+  });
+}
+
+function triggerAudit() {
+  const btn = document.getElementById('audit-btn');
+  const out = document.getElementById('audit-output');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Running...';
+  out.style.display = 'block';
+  out.textContent = 'Waiting for orchestrator...';
+  fetch('/audit', { method:'POST', headers:{'X-Requested-With':'XMLHttpRequest'} })
+    .then(r => r.json())
+    .then(r => {
+      btn.disabled = false;
+      btn.innerHTML = '&#9654; Run Audit';
+      out.textContent = r.output || '(no output)';
+      showToast(r.ok ? 'Audit complete' : 'Audit failed', r.ok ? 'success' : 'error');
+    }).catch(e => { btn.disabled=false; btn.textContent='Run Audit'; out.textContent='Error: '+e; });
+}
+
+// Toast notifications
+function showToast(msg, type) {
+  const t = document.createElement('div');
+  t.textContent = msg;
+  Object.assign(t.style, {
+    position:'fixed', bottom:'20px', right:'20px', zIndex:9999,
+    background: type === 'success' ? '#2ecc71' : '#e74c3c',
+    color:'#fff', padding:'10px 18px', borderRadius:'8px',
+    fontWeight:'600', fontSize:'13px', boxShadow:'0 4px 12px rgba(0,0,0,.4)',
+    transition:'opacity .4s'
+  });
+  document.body.appendChild(t);
+  setTimeout(() => { t.style.opacity = 0; setTimeout(() => t.remove(), 400); }, 3000);
+}
+
+// Auto-refresh stats every 30s
+setInterval(() => {
+  fetch('/api/pending').then(r=>r.json()).then(data => {
+    const badge = document.getElementById('pending-count');
+    if (badge) badge.textContent = data.length;
+  }).catch(()=>{});
+}, 30000);
+</script>
+</body>
+</html>

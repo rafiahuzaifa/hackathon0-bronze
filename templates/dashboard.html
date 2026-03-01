@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — AI Employee Vault{% endblock %}
+{% block content %}
+
+<!-- Stat chips -->
+<div class="stats">
+  <div class="stat">
+    <div class="stat-num" id="pending-count">{{ pending|length }}</div>
+    <div class="stat-lbl">Pending Approval</div>
+  </div>
+  <div class="stat">
+    <div class="stat-num">{{ events|length }}</div>
+    <div class="stat-lbl">Recent Events</div>
+  </div>
+  <div class="stat">
+    <div class="stat-num" style="font-size:14px; padding-top:4px;">{{ now }}</div>
+    <div class="stat-lbl">Last Refresh</div>
+  </div>
+</div>
+
+<div class="grid2">
+
+  <!-- Left: Dashboard.md -->
+  <div>
+    <div class="card" style="margin-bottom:20px;">
+      <div class="card-title">&#x1F4CA; Vault Dashboard</div>
+      <div class="md-body">{{ dashboard_html|safe }}</div>
+    </div>
+
+    <!-- Manual Audit Trigger -->
+    <div class="card">
+      <div class="card-title">&#x26A1; Manual Audit</div>
+      <p style="font-size:12px; color:var(--muted); margin-bottom:12px;">
+        Run the orchestrator immediately (simulate mode). Results appear below.
+      </p>
+      <button class="btn btn-audit" id="audit-btn" onclick="triggerAudit()">&#9654; Run Audit</button>
+      <pre id="audit-output"></pre>
+    </div>
+  </div>
+
+  <!-- Right: Pending Approval + Activity Log -->
+  <div>
+    <div class="card" style="margin-bottom:20px;">
+      <div class="card-title">
+        &#x1F4CB; Pending Approval
+        <span class="badge" id="pending-count-badge">{{ pending|length }}</span>
+      </div>
+
+      {% if pending %}
+        {% for item in pending %}
+        <div class="pending-item" data-file="{{ item.filename }}">
+          <div class="pending-meta">
+            <div class="name">
+              <span class="pill pill-{{ item.category }}">{{ item.category }}</span>
+              {{ item.filename }}
+            </div>
+            <div style="font-size:11px; color:var(--muted); margin: 3px 0 6px;">
+              Modified: {{ item.modified }}
+              {% if item.meta %}
+                &nbsp;|&nbsp;
+                {% for k, v in item.meta.items() %}
+                  <strong>{{ k }}</strong>: {{ v }}{% if not loop.last %}, {% endif %}
+                {% endfor %}
+              {% endif %}
+            </div>
+            <div class="body">{{ item.body }}</div>
+          </div>
+          <div class="pending-actions">
+            <button class="btn btn-approve btn-sm" onclick="approve('{{ item.filename }}')">&#10003; Approve</button>
+            <button class="btn btn-reject  btn-sm" onclick="reject('{{ item.filename }}')">&#10005; Reject</button>
+          </div>
+        </div>
+        {% endfor %}
+      {% else %}
+        <p style="color:var(--muted); font-size:13px; padding:10px 0;">
+          No items pending approval. &#x2714; All clear.
+        </p>
+      {% endif %}
+    </div>
+
+    <!-- Activity log -->
+    <div class="card">
+      <div class="card-title">&#x1F4DD; Activity Log</div>
+      {% if events %}
+        {% for ev in events %}
+        <div class="event-row">
+          <span class="event-ts">{{ ev.ts }}</span>
+          <span class="{{ 'event-ok' if ev.success else 'event-fail' }}">
+            {{ '[OK]' if ev.success else '[ERR]' }}
+          </span>
+          <span>{{ ev.action }}</span>
+          {% if ev.detail %}
+            <span style="color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:200px;" title="{{ ev.detail }}">
+              — {{ ev.detail }}
+            </span>
+          {% endif %}
+        </div>
+        {% endfor %}
+      {% else %}
+        <p style="color:var(--muted); font-size:13px;">No activity yet this session.</p>
+      {% endif %}
+    </div>
+  </div>
+
+</div>
+
+<script>
+// Sync both pending-count displays
+document.addEventListener('DOMContentLoaded', function() {
+  const c1 = document.getElementById('pending-count');
+  const c2 = document.getElementById('pending-count-badge');
+  if (c1 && c2) {
+    const orig_approve = window.approve;
+    window.approve = function(fn) { orig_approve(fn); syncCount(); };
+    const orig_reject = window.reject;
+    window.reject = function(fn) { orig_reject(fn); syncCount(); };
+    function syncCount() {
+      setTimeout(() => {
+        const n = document.querySelectorAll('.pending-item').length;
+        c1.textContent = n; c2.textContent = n;
+      }, 350);
+    }
+  }
+});
+</script>
+{% endblock %}

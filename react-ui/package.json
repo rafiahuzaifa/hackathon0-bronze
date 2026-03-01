@@ -1,0 +1,19 @@
+{
+  "name": "ai-employee-vault-ui",
+  "version": "1.0.0",
+  "description": "AI Employee Vault — React + Express web dashboard",
+  "private": true,
+  "workspaces": [
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "dev":   "concurrently \"npm run dev --workspace=server\" \"npm run dev --workspace=client\"",
+    "start": "npm run start --workspace=server",
+    "build": "npm run build --workspace=client",
+    "test":  "node server/test-simulate.js"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
