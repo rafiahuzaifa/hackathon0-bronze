@@ -1,0 +1,120 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────────────
+# AI Employee — Docker Compose
+# Services:
+#   api      — FastAPI backend          :8000
+#   dashboard — Next.js 14 dashboard    :3000
+# Shared:
+#   vault-data  — Obsidian vault volume
+# ─────────────────────────────────────────────────────────────────
+
+services:
+
+  # ──────────────────────────────────────
+  # Python Backend (FastAPI + Orchestrator)
+  # ──────────────────────────────────────
+  api:
+    build:
+      context: ./ai_employee
+      dockerfile: Dockerfile
+    container_name: ai-employee-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - DRY_RUN=${DRY_RUN:-true}
+      - VAULT_PATH=/app/vault
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - BANK_CURRENCY=${BANK_CURRENCY:-PKR}
+      - MAX_ACTIONS_PER_HOUR=${MAX_ACTIONS_PER_HOUR:-10}
+      # Gmail
+      - GMAIL_CLIENT_ID=${GMAIL_CLIENT_ID}
+      - GMAIL_CLIENT_SECRET=${GMAIL_CLIENT_SECRET}
+      - GMAIL_TOKEN_PATH=/app/vault/sessions/gmail_token.json
+      # Twitter
+      - TWITTER_API_KEY=${TWITTER_API_KEY}
+      - TWITTER_API_SECRET=${TWITTER_API_SECRET}
+      - TWITTER_ACCESS_TOKEN=${TWITTER_ACCESS_TOKEN}
+      - TWITTER_ACCESS_TOKEN_SECRET=${TWITTER_ACCESS_TOKEN_SECRET}
+      - TWITTER_BEARER_TOKEN=${TWITTER_BEARER_TOKEN}
+      # LinkedIn
+      - LINKEDIN_ACCESS_TOKEN=${LINKEDIN_ACCESS_TOKEN}
+      # Facebook / Instagram
+      - FACEBOOK_PAGE_ACCESS_TOKEN=${FACEBOOK_PAGE_ACCESS_TOKEN}
+      - FACEBOOK_PAGE_ID=${FACEBOOK_PAGE_ID}
+      - INSTAGRAM_BUSINESS_ACCOUNT_ID=${INSTAGRAM_BUSINESS_ACCOUNT_ID}
+    volumes:
+      - vault-data:/app/vault
+      - bank-uploads:/app/uploads/bank
+    networks:
+      - ai-employee-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  # ──────────────────────────────────────
+  # Next.js 14 Dashboard
+  # ──────────────────────────────────────
+  dashboard:
+    build:
+      context: ./nextjs-dashboard
+      dockerfile: Dockerfile
+    container_name: ai-employee-dashboard
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_API_URL=http://api:8000
+      - NEXT_PUBLIC_WS_URL=ws://api:8000/ws/live
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - ai-employee-net
+
+  # ──────────────────────────────────────
+  # Watchdog Monitor (sidecar)
+  # ──────────────────────────────────────
+  watchdog:
+    build:
+      context: ./ai_employee
+      dockerfile: Dockerfile
+    container_name: ai-employee-watchdog
+    restart: unless-stopped
+    command: ["python", "watchdog_monitor.py"]
+    environment:
+      - VAULT_PATH=/app/vault
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - API_HOST=api
+      - API_PORT=8000
+    volumes:
+      - vault-data:/app/vault
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - ai-employee-net
+
+# ──────────────────────────────────────
+# Volumes
+# ──────────────────────────────────────
+volumes:
+  vault-data:
+    driver: local
+  bank-uploads:
+    driver: local
+
+# ──────────────────────────────────────
+# Networks
+# ──────────────────────────────────────
+networks:
+  ai-employee-net:
+    driver: bridge

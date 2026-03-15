@@ -1,0 +1,13 @@
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.env
+.env.local
+vault/sessions/
+vault/pids/
+vault/Logs/
+.ralph_state.json
+*.log
+uploads/
+sessions/
