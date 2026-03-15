@@ -30,3 +30,16 @@ ceo_briefing.log
 Briefings/Briefing_*
 .ralph_state.json
 ralph_wiggum.log
+Logs/
+react-ui/node_modules/
+react-ui/server/node_modules/
+react-ui/client/node_modules/
+react-ui/client/build/
+react-ui/.env
+react-ui/server/.env
+react-ui*.log
+ui.log
+react-ui.log
+nextjs-dashboard/node_modules/
+nextjs-dashboard/.next/
+nextjs-dashboard/.env.local

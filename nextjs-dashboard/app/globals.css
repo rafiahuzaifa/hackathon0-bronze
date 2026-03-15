@@ -1,0 +1,121 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-primary: #0d0e1a;
+  --bg-card: #13141f;
+  --bg-card-hover: #1a1b2e;
+  --accent-purple: #7c3aed;
+  --accent-blue: #3b82f6;
+  --accent-green: #10b981;
+  --accent-yellow: #f59e0b;
+  --accent-red: #ef4444;
+  --accent-teal: #14b8a6;
+  --text-primary: #f1f5f9;
+  --text-muted: #64748b;
+  --border: #1e2035;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg-primary); }
+::-webkit-scrollbar-thumb { background: #2a2d4a; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #3a3d5a; }
+
+/* Glass morphism */
+.glass {
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  background: rgba(19, 20, 31, 0.8);
+  border: 1px solid rgba(30, 32, 53, 0.8);
+}
+
+/* Glow effects */
+.glow-purple { box-shadow: 0 0 20px rgba(124, 58, 237, 0.25); }
+.glow-blue   { box-shadow: 0 0 20px rgba(59, 130, 246, 0.25); }
+.glow-green  { box-shadow: 0 0 20px rgba(16, 185, 129, 0.25); }
+
+/* Animated gradient border */
+.gradient-border {
+  background: linear-gradient(var(--bg-card), var(--bg-card)) padding-box,
+              linear-gradient(135deg, #7c3aed, #3b82f6) border-box;
+  border: 1px solid transparent;
+}
+
+/* Status dot pulse */
+.dot-pulse {
+  animation: dotPulse 2s ease-in-out infinite;
+}
+@keyframes dotPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(0.85); }
+}
+
+/* Card hover lift */
+.card-hover {
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+.card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  border-color: #2a2d4a;
+}
+
+/* Button transitions */
+.btn-transition {
+  transition: all 0.15s ease;
+}
+.btn-transition:hover {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+}
+.btn-transition:active {
+  transform: translateY(0);
+}
+
+/* Sidebar active indicator */
+.nav-active {
+  background: var(--bg-card-hover);
+  border-left: 3px solid var(--accent-blue);
+}
+
+/* Progress bar */
+.progress-bar {
+  background: var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.6s ease;
+}
+
+/* Risk badges */
+.risk-low    { background: rgba(16,185,129,0.15); color: #10b981; border: 1px solid rgba(16,185,129,0.3); }
+.risk-medium { background: rgba(245,158,11,0.15); color: #f59e0b; border: 1px solid rgba(245,158,11,0.3); }
+.risk-high   { background: rgba(239,68,68,0.15);  color: #ef4444; border: 1px solid rgba(239,68,68,0.3); }
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(-12px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+.animate-fade-in { animation: fadeIn 0.35s ease forwards; }
+.animate-slide-in { animation: slideIn 0.3s ease forwards; }
