@@ -1,7 +1,0 @@
-{
-  "rootDirectory": "nextjs-dashboard",
-  "framework": "nextjs",
-  "env": {
-    "NEXT_PUBLIC_API_URL": ""
-  }
-}

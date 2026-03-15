@@ -43,3 +43,4 @@ react-ui.log
 nextjs-dashboard/node_modules/
 nextjs-dashboard/.next/
 nextjs-dashboard/.env.local
+.vercel
