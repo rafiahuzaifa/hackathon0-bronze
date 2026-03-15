@@ -22,6 +22,15 @@ export const api = {
   toggleBot:      (name: string) => apiFetch<{ ok: boolean; status: string }>(`/api/bots/${name}/toggle`, { method: 'POST' }),
   fetchTasks:     () => apiFetch<TaskFile[]>('/api/tasks'),
   fetchFinance:   () => apiFetch<FinanceData>('/api/finance'),
+
+  // Social media
+  socialPost:       (body: { content: string; platforms?: string[]; image_url?: string; schedule_time?: string }) =>
+                      apiFetch<{ status: string; result: unknown }>('/api/social/post', { method: 'POST', body: JSON.stringify(body) }),
+  fetchScheduled:   () => apiFetch<unknown[]>('/api/social/scheduled'),
+  cancelScheduled:  (filename: string) => apiFetch<{ status: string }>(`/api/social/scheduled/${encodeURIComponent(filename)}`, { method: 'DELETE' }),
+  fetchAnalytics:   () => apiFetch<unknown[]>('/api/social/analytics'),
+  fetchSocialFeed:  () => apiFetch<unknown[]>('/api/social/feed'),
+  approveSocial:    (id: string) => apiFetch<{ status: string }>(`/api/social/approve/${id}`, { method: 'POST' }),
 };
 
 // ---- Mock data (used when API is not available) ----

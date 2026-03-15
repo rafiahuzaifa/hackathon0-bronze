@@ -12,6 +12,12 @@ Endpoints:
   POST /api/bots/{name}/toggle
   GET  /api/tasks
   GET  /api/finance
+  POST /api/social/post
+  GET  /api/social/scheduled
+  DELETE /api/social/scheduled/{file_name}
+  GET  /api/social/analytics
+  GET  /api/social/feed
+  POST /api/social/approve/{approval_id}
   WS   /ws/live
 """
 
@@ -120,6 +126,43 @@ class FinanceSummary(BaseModel):
     net: float
     transactions: List[FinanceEntry]
     currency: str
+
+
+# Social media models
+class SocialPostRequest(BaseModel):
+    content: str
+    platforms: Optional[List[str]] = None
+    image_url: Optional[str] = None
+    schedule_time: Optional[str] = None  # ISO datetime string
+
+
+class ScheduledPost(BaseModel):
+    filename: str
+    platform: str
+    scheduled_time: str
+    content_preview: str
+    recurring: str
+    status: str
+
+
+class SocialAnalytics(BaseModel):
+    platform: str
+    followers: Optional[int] = None
+    following: Optional[int] = None
+    post_count: Optional[int] = None
+    reach: Optional[int] = None
+    engagement_rate: Optional[float] = None
+    name: Optional[str] = None
+
+
+class SocialFeedItem(BaseModel):
+    id: str
+    platform: str
+    content_preview: str
+    created_at: str
+    status: str
+    risk: Optional[str] = None
+    result: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -515,6 +558,185 @@ async def get_finance() -> FinanceSummary:
         transactions=transactions,
         currency=currency,
     )
+
+
+# ---------------------------------------------------------------------------
+# Social Media Routes
+# ---------------------------------------------------------------------------
+
+SCHEDULED_DIR = VAULT_PATH / "Scheduled"
+SOCIAL_DONE_DIR = VAULT_PATH / "Done"
+
+
+def _get_social_manager():
+    """Lazy-load SocialMediaManager to avoid import at startup."""
+    import sys
+    sys.path.insert(0, str(BASE_DIR))
+    from social.social_manager import SocialMediaManager
+    return SocialMediaManager(vault_path=VAULT_PATH)
+
+
+@app.post("/api/social/post", tags=["Social"])
+async def social_post(req: SocialPostRequest, background_tasks: BackgroundTasks) -> Dict[str, Any]:
+    """
+    Post or schedule content to social media platforms.
+    Claude adapts content per platform and assesses risk.
+    """
+    try:
+        sm = _get_social_manager()
+        schedule_dt = None
+        if req.schedule_time:
+            from datetime import datetime as dt
+            schedule_dt = dt.fromisoformat(req.schedule_time)
+
+        result = sm.post_to_all(
+            content=req.content,
+            image_path=req.image_url,
+            platforms=req.platforms,
+            schedule_time=schedule_dt,
+        )
+        _append_audit_log("SOCIAL_POST_API", "Social post requested via API", {
+            "platforms": req.platforms, "scheduled": bool(req.schedule_time),
+        })
+        background_tasks.add_task(
+            _broadcast_event,
+            {"type": "social_post", "result": result,
+             "ts": datetime.utcnow().isoformat() + "Z"},
+        )
+        return {"status": "ok", "result": result}
+    except Exception as exc:
+        logger.error("Social post failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/social/scheduled", response_model=List[ScheduledPost], tags=["Social"])
+async def get_scheduled_posts() -> List[ScheduledPost]:
+    """Return all pending scheduled posts sorted by scheduled_time."""
+    SCHEDULED_DIR.mkdir(parents=True, exist_ok=True)
+    posts = []
+    for f in SCHEDULED_DIR.glob("*.md"):
+        try:
+            text = f.read_text(encoding="utf-8")
+            meta = _parse_frontmatter(text)
+            if meta.get("status", "pending") != "pending":
+                continue
+            posts.append(ScheduledPost(
+                filename=f.name,
+                platform=str(meta.get("platform", "")),
+                scheduled_time=str(meta.get("scheduled_time", "")),
+                content_preview=str(meta.get("content", ""))[:150],
+                recurring=str(meta.get("recurring", "none")),
+                status="pending",
+            ))
+        except OSError:
+            pass
+    posts.sort(key=lambda p: p.scheduled_time)
+    return posts
+
+
+@app.delete("/api/social/scheduled/{file_name}", tags=["Social"])
+async def cancel_scheduled_post(file_name: str) -> Dict[str, str]:
+    """Cancel a scheduled post by moving it to vault/Cancelled/."""
+    src = SCHEDULED_DIR / file_name
+    if not src.exists():
+        raise HTTPException(status_code=404, detail=f"Scheduled post not found: {file_name}")
+    cancelled_dir = VAULT_PATH / "Cancelled"
+    cancelled_dir.mkdir(parents=True, exist_ok=True)
+    import re
+    text = src.read_text(encoding="utf-8")
+    text = re.sub(r'(\n|^)status:\s*\S+', r'\1status: "cancelled"', text)
+    dest = cancelled_dir / file_name
+    dest.write_text(text, encoding="utf-8")
+    src.unlink()
+    _append_audit_log("SCHEDULED_CANCELLED", f"Cancelled via API: {file_name}", {})
+    return {"status": "cancelled", "file": file_name}
+
+
+@app.get("/api/social/analytics", response_model=List[SocialAnalytics], tags=["Social"])
+async def get_social_analytics() -> List[SocialAnalytics]:
+    """Fetch analytics from all connected social platforms."""
+    results: List[SocialAnalytics] = []
+    try:
+        sm = _get_social_manager()
+        data = sm.get_analytics()
+        for platform, info in data.items():
+            results.append(SocialAnalytics(
+                platform=platform,
+                followers=info.get("followers"),
+                following=info.get("following"),
+                post_count=info.get("tweet_count") or info.get("post_count"),
+                name=info.get("name"),
+            ))
+    except Exception as exc:
+        logger.warning("Analytics fetch failed: %s", exc)
+    # Ensure all 4 platforms represented
+    present = {r.platform for r in results}
+    for p in ("linkedin", "twitter", "facebook", "instagram"):
+        if p not in present:
+            results.append(SocialAnalytics(platform=p))
+    return results
+
+
+@app.get("/api/social/feed", response_model=List[SocialFeedItem], tags=["Social"])
+async def get_social_feed() -> List[SocialFeedItem]:
+    """
+    Recent social posts from Done/ and Pending_Approval/ (social type only).
+    """
+    items: List[SocialFeedItem] = []
+
+    def _collect(directory: Path, status: str) -> None:
+        if not directory.exists():
+            return
+        for f in sorted(directory.glob("SOCIAL_*.md"),
+                        key=lambda p: p.stat().st_mtime, reverse=True)[:15]:
+            try:
+                text = f.read_text(encoding="utf-8")
+                meta = _parse_frontmatter(text)
+                items.append(SocialFeedItem(
+                    id=f.stem,
+                    platform=str(meta.get("platform", "unknown")),
+                    content_preview=str(meta.get("content", ""))[:200],
+                    created_at=str(meta.get("created_at",
+                                            datetime.fromtimestamp(f.stat().st_mtime).isoformat())),
+                    status=status,
+                    risk=str(meta.get("risk", "")) or None,
+                    result=str(meta.get("post_result", "")) or None,
+                ))
+            except OSError:
+                pass
+
+    _collect(SOCIAL_DONE_DIR, "done")
+    _collect(PENDING_APPROVAL_DIR, "pending_approval")
+    items.sort(key=lambda x: x.created_at, reverse=True)
+    return items[:20]
+
+
+@app.post("/api/social/approve/{approval_id}", tags=["Social"])
+async def approve_social_post(
+    approval_id: str, background_tasks: BackgroundTasks
+) -> Dict[str, str]:
+    """
+    Approve a pending social post. Moves file to Approved/ so the
+    orchestrator picks it up and dispatches via SocialMCP.
+    """
+    _ensure_dirs()
+    src = PENDING_APPROVAL_DIR / f"{approval_id}.md"
+    if not src.exists():
+        candidates = list(PENDING_APPROVAL_DIR.glob(f"{approval_id}*"))
+        if not candidates:
+            raise HTTPException(status_code=404, detail=f"Not found: {approval_id}")
+        src = candidates[0]
+
+    APPROVED_DIR.mkdir(parents=True, exist_ok=True)
+    dest = APPROVED_DIR / src.name
+    src.rename(dest)
+    _append_audit_log("SOCIAL_APPROVED", f"Social post approved: {src.name}", {"id": approval_id})
+    background_tasks.add_task(
+        _broadcast_event,
+        {"type": "social_approved", "id": approval_id,
+         "ts": datetime.utcnow().isoformat() + "Z"},
+    )
+    return {"status": "approved", "id": approval_id}
 
 
 @app.websocket("/ws/live")
