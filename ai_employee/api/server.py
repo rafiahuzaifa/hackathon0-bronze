@@ -739,6 +739,237 @@ async def approve_social_post(
     return {"status": "approved", "id": approval_id}
 
 
+# ---------------------------------------------------------------------------
+# Search / RAG Memory Routes
+# ---------------------------------------------------------------------------
+
+class SearchResult(BaseModel):
+    id: str
+    title: str
+    type: str
+    preview: str
+    date: str
+    path: str
+    relevance: int
+    risk: Optional[str] = None
+    status: Optional[str] = None
+
+
+class SearchResponse(BaseModel):
+    query: str
+    results: List[SearchResult]
+    total: int
+    backend: str
+
+
+@app.get("/api/search", response_model=SearchResponse, tags=["Memory"])
+async def vault_search(q: str = "", n: int = 10, type: Optional[str] = None) -> SearchResponse:
+    """Semantic search across all vault documents via RAG (ChromaDB)."""
+    if not q.strip():
+        return SearchResponse(query=q, results=[], total=0, backend="none")
+    try:
+        import sys
+        sys.path.insert(0, str(BASE_DIR))
+        from memory.rag_memory import get_rag
+        rag = get_rag(vault_path=VAULT_PATH)
+        hits = rag.search(q, n=n, type_filter=type or None)
+        return SearchResponse(
+            query=q,
+            results=[SearchResult(**h) for h in hits],
+            total=len(hits),
+            backend=rag.stats()["backend"],
+        )
+    except Exception as exc:
+        logger.error("RAG search failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/memory/reindex", tags=["Memory"])
+async def reindex_vault(background_tasks: BackgroundTasks) -> Dict[str, str]:
+    """Trigger a full vault re-index in the background."""
+    def _do_index():
+        try:
+            import sys
+            sys.path.insert(0, str(BASE_DIR))
+            from memory.rag_memory import get_rag
+            rag = get_rag(vault_path=VAULT_PATH)
+            count = rag.index_vault(force=True)
+            logger.info("RAG reindex complete: %d docs", count)
+        except Exception as exc:
+            logger.error("RAG reindex failed: %s", exc)
+
+    background_tasks.add_task(_do_index)
+    return {"status": "reindex_started"}
+
+
+@app.get("/api/memory/stats", tags=["Memory"])
+async def memory_stats() -> Dict[str, Any]:
+    """Return RAG index statistics."""
+    try:
+        import sys
+        sys.path.insert(0, str(BASE_DIR))
+        from memory.rag_memory import get_rag
+        rag = get_rag(vault_path=VAULT_PATH)
+        return rag.stats()
+    except Exception as exc:
+        return {"error": str(exc), "backend": "unavailable"}
+
+
+# ---------------------------------------------------------------------------
+# LinkedIn Routes
+# ---------------------------------------------------------------------------
+
+class LinkedInPostRequest(BaseModel):
+    text: str
+    image_path: Optional[str] = None
+
+
+@app.post("/api/linkedin/post", tags=["LinkedIn"])
+async def linkedin_post(req: LinkedInPostRequest) -> Dict[str, Any]:
+    """Post text (or text+image) to LinkedIn."""
+    try:
+        import sys; sys.path.insert(0, str(BASE_DIR))
+        from integrations.linkedin_api import get_linkedin
+        li = get_linkedin()
+        if req.image_path:
+            urn = li.post_with_image(req.text, Path(req.image_path))
+        else:
+            urn = li.post_text(req.text)
+        _append_audit_log("LINKEDIN_POST", f"Posted: {urn}", {"text": req.text[:80]})
+        return {"status": "ok", "post_urn": urn}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/linkedin/analytics", tags=["LinkedIn"])
+async def linkedin_analytics() -> Dict[str, Any]:
+    try:
+        import sys; sys.path.insert(0, str(BASE_DIR))
+        from integrations.linkedin_api import get_linkedin
+        return get_linkedin().get_profile_analytics()
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+@app.get("/api/linkedin/messages", tags=["LinkedIn"])
+async def linkedin_messages(limit: int = 20) -> List[Dict[str, Any]]:
+    try:
+        import sys; sys.path.insert(0, str(BASE_DIR))
+        from integrations.linkedin_api import get_linkedin
+        return get_linkedin().get_unread_messages(limit=limit)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/linkedin/invitations", tags=["LinkedIn"])
+async def linkedin_invitations() -> List[Dict[str, Any]]:
+    try:
+        import sys; sys.path.insert(0, str(BASE_DIR))
+        from integrations.linkedin_api import get_linkedin
+        return get_linkedin().get_pending_invitations()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Twitter Routes
+# ---------------------------------------------------------------------------
+
+class TweetRequest(BaseModel):
+    text: str
+    in_reply_to: Optional[str] = None
+
+
+class ThreadRequest(BaseModel):
+    tweets: List[str]
+
+
+@app.post("/api/twitter/tweet", tags=["Twitter"])
+async def post_tweet(req: TweetRequest) -> Dict[str, Any]:
+    try:
+        import sys; sys.path.insert(0, str(BASE_DIR))
+        from integrations.twitter_api import get_twitter
+        tid = get_twitter().post_tweet(req.text, in_reply_to=req.in_reply_to)
+        _append_audit_log("TWITTER_TWEET", f"Tweeted: {tid}", {"text": req.text[:80]})
+        return {"status": "ok", "tweet_id": tid}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/twitter/thread", tags=["Twitter"])
+async def post_thread(req: ThreadRequest) -> Dict[str, Any]:
+    try:
+        import sys; sys.path.insert(0, str(BASE_DIR))
+        from integrations.twitter_api import get_twitter
+        ids = get_twitter().post_thread(req.tweets)
+        return {"status": "ok", "tweet_ids": ids}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/twitter/mentions", tags=["Twitter"])
+async def twitter_mentions(limit: int = 20) -> List[Dict[str, Any]]:
+    try:
+        import sys; sys.path.insert(0, str(BASE_DIR))
+        from integrations.twitter_api import get_twitter
+        return get_twitter().get_mentions(limit=limit)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/twitter/analytics", tags=["Twitter"])
+async def twitter_analytics() -> Dict[str, Any]:
+    try:
+        import sys; sys.path.insert(0, str(BASE_DIR))
+        from integrations.twitter_api import get_twitter
+        return get_twitter().get_profile_analytics()
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+@app.delete("/api/twitter/tweet/{tweet_id}", tags=["Twitter"])
+async def delete_tweet(tweet_id: str) -> Dict[str, str]:
+    try:
+        import sys; sys.path.insert(0, str(BASE_DIR))
+        from integrations.twitter_api import get_twitter
+        ok = get_twitter().delete_tweet(tweet_id)
+        return {"status": "deleted" if ok else "failed", "tweet_id": tweet_id}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ---------------------------------------------------------------------------
+# WhatsApp Routes
+# ---------------------------------------------------------------------------
+
+class WAMessageRequest(BaseModel):
+    phone_or_name: str
+    text: str
+
+
+@app.post("/api/whatsapp/send", tags=["WhatsApp"])
+async def whatsapp_send(req: WAMessageRequest) -> Dict[str, Any]:
+    try:
+        import sys; sys.path.insert(0, str(BASE_DIR))
+        from integrations.whatsapp_playwright import get_whatsapp
+        wa = get_whatsapp()
+        ok = wa.send_sync(req.phone_or_name, req.text)
+        _append_audit_log("WHATSAPP_SEND", f"Sent to {req.phone_or_name}", {"text": req.text[:80]})
+        return {"status": "sent" if ok else "failed", "to": req.phone_or_name}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/whatsapp/unread", tags=["WhatsApp"])
+async def whatsapp_unread() -> List[Dict[str, Any]]:
+    try:
+        import sys; sys.path.insert(0, str(BASE_DIR))
+        from integrations.whatsapp_playwright import get_whatsapp
+        return get_whatsapp().get_unread_sync()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @app.websocket("/ws/live")
 async def websocket_live(websocket: WebSocket) -> None:
     await websocket.accept()
