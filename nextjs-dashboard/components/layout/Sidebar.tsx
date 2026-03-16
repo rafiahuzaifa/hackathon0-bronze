@@ -5,7 +5,7 @@ import {
   Zap, LayoutDashboard, CheckSquare, Activity, Bot,
   Mail, Share2, MessageCircle, Webhook,
   DollarSign, Building2, FileText, Search,
-  LogOut, ChevronRight
+  Settings, LogOut, ChevronRight
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -35,6 +35,12 @@ const navSections = [
       { label: 'Bank Monitor', href: '/bank',     icon: Building2,       badge: null },
       { label: 'CEO Report',   href: '/report',   icon: FileText,        badge: null },
       { label: 'AI Search',    href: '/search',   icon: Search,          badge: null },
+    ],
+  },
+  {
+    label: 'SYSTEM',
+    items: [
+      { label: 'Setup & Credentials', href: '/setup', icon: Settings, badge: null },
     ],
   },
 ];

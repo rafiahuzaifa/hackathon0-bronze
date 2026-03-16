@@ -970,6 +970,183 @@ async def whatsapp_unread() -> List[Dict[str, Any]]:
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+# ---------------------------------------------------------------------------
+# System / Setup Routes
+# ---------------------------------------------------------------------------
+
+_runtime_dry_run: bool = DRY_RUN
+
+
+class ModeRequest(BaseModel):
+    live: bool
+
+
+def _read_env_file() -> Dict[str, str]:
+    env_path = BASE_DIR / ".env"
+    data: Dict[str, str] = {}
+    if env_path.exists():
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, _, v = line.partition("=")
+                data[k.strip()] = v.strip()
+    return data
+
+
+def _write_env_key(key: str, value: str) -> None:
+    env_path = BASE_DIR / ".env"
+    lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
+    updated = False
+    new_lines = []
+    for line in lines:
+        stripped = line.split("=", 1)[0].strip()
+        if stripped == key:
+            new_lines.append(f"{key}={value}")
+            updated = True
+        else:
+            new_lines.append(line)
+    if not updated:
+        new_lines.append(f"{key}={value}")
+    env_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+
+
+@app.post("/api/system/mode", tags=["System"])
+async def set_mode(req: ModeRequest) -> Dict[str, Any]:
+    global _runtime_dry_run
+    _runtime_dry_run = not req.live
+    try:
+        _write_env_key("DRY_RUN", "false" if req.live else "true")
+        os.environ["DRY_RUN"] = "false" if req.live else "true"
+    except Exception as exc:
+        logger.warning("Could not persist DRY_RUN: %s", exc)
+    mode = "live" if req.live else "demo"
+    _append_audit_log("MODE_CHANGE", f"Switched to {mode.upper()}", {"live": req.live})
+    return {"status": "ok", "mode": mode, "dry_run": not req.live}
+
+
+@app.get("/api/system/credentials", tags=["System"])
+async def get_credentials() -> Dict[str, Any]:
+    env = _read_env_file()
+    SECRET_KEYS = {
+        "ANTHROPIC_API_KEY", "GMAIL_CLIENT_SECRET",
+        "LINKEDIN_CLIENT_SECRET", "LINKEDIN_ACCESS_TOKEN", "LINKEDIN_REFRESH_TOKEN",
+        "TWITTER_API_SECRET", "TWITTER_ACCESS_TOKEN",
+        "TWITTER_ACCESS_TOKEN_SECRET", "TWITTER_BEARER_TOKEN",
+        "FACEBOOK_APP_SECRET", "FACEBOOK_PAGE_ACCESS_TOKEN",
+        "INSTAGRAM_ACCESS_TOKEN",
+    }
+    masked: Dict[str, str] = {}
+    for k, v in env.items():
+        if k in SECRET_KEYS and v and len(v) > 8:
+            masked[k] = v[:4] + "****" + v[-4:]
+        else:
+            masked[k] = v
+    return {
+        "credentials": masked,
+        "dry_run": os.environ.get("DRY_RUN", "true").lower() == "true",
+    }
+
+
+@app.post("/api/system/credentials", tags=["System"])
+async def save_credentials(body: Dict[str, str]) -> Dict[str, str]:
+    ALLOWED_KEYS = {
+        "ANTHROPIC_API_KEY",
+        "GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET",
+        "LINKEDIN_CLIENT_ID", "LINKEDIN_CLIENT_SECRET",
+        "LINKEDIN_ACCESS_TOKEN", "LINKEDIN_REFRESH_TOKEN",
+        "TWITTER_API_KEY", "TWITTER_API_SECRET",
+        "TWITTER_ACCESS_TOKEN", "TWITTER_ACCESS_TOKEN_SECRET", "TWITTER_BEARER_TOKEN",
+        "FACEBOOK_APP_ID", "FACEBOOK_APP_SECRET",
+        "FACEBOOK_PAGE_ACCESS_TOKEN", "FACEBOOK_PAGE_ID",
+        "INSTAGRAM_ACCESS_TOKEN", "INSTAGRAM_ACCOUNT_ID",
+        "WHATSAPP_SESSION_PATH", "BANK_CURRENCY", "BANK_ANOMALY_THRESHOLD",
+    }
+    saved = []
+    for key, value in body.items():
+        if key in ALLOWED_KEYS and value:
+            _write_env_key(key, value)
+            os.environ[key] = value
+            saved.append(key)
+    _append_audit_log("CREDENTIALS_SAVED", f"Saved {len(saved)} keys", {"keys": saved})
+    return {"status": "ok", "saved": str(len(saved)), "keys": ", ".join(saved)}
+
+
+@app.get("/api/system/status", tags=["System"])
+async def get_system_status() -> Dict[str, Any]:
+    env = _read_env_file()
+
+    def _has(key: str) -> bool:
+        v = env.get(key, os.environ.get(key, ""))
+        return bool(v and v not in ("", "sk-ant-...", "your_key_here"))
+
+    return {
+        "claude":    "ok" if _has("ANTHROPIC_API_KEY")          else "unconfigured",
+        "gmail":     "ok" if _has("GMAIL_CLIENT_SECRET")        else "unconfigured",
+        "linkedin":  "ok" if _has("LINKEDIN_ACCESS_TOKEN")      else "unconfigured",
+        "twitter":   "ok" if _has("TWITTER_BEARER_TOKEN")       else "unconfigured",
+        "facebook":  "ok" if _has("FACEBOOK_PAGE_ACCESS_TOKEN") else "unconfigured",
+        "instagram": "ok" if _has("INSTAGRAM_ACCESS_TOKEN")     else "unconfigured",
+        "whatsapp":  "ok" if _has("WHATSAPP_SESSION_PATH")      else "unconfigured",
+        "bank":      "ok",
+    }
+
+
+@app.post("/api/system/test/{platform_id}", tags=["System"])
+async def test_platform(platform_id: str) -> Dict[str, Any]:
+    import sys
+    sys.path.insert(0, str(BASE_DIR))
+    try:
+        if platform_id == "claude":
+            import anthropic
+            c = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+            c.messages.create(model="claude-haiku-4-5-20251001", max_tokens=5,
+                              messages=[{"role": "user", "content": "hi"}])
+            return {"ok": True}
+
+        elif platform_id == "linkedin":
+            from integrations.linkedin_api import get_linkedin
+            p = get_linkedin().get_profile()
+            return {"ok": True, "name": p.get("localizedFirstName", "")}
+
+        elif platform_id == "twitter":
+            from integrations.twitter_api import get_twitter
+            d = get_twitter().get_profile_analytics()
+            return {"ok": True, "username": d.get("username", "")}
+
+        elif platform_id == "facebook":
+            import requests as _req
+            token = os.environ.get("FACEBOOK_PAGE_ACCESS_TOKEN", "")
+            r = _req.get("https://graph.facebook.com/v19.0/me",
+                         params={"access_token": token}, timeout=10)
+            r.raise_for_status()
+            return {"ok": True, "name": r.json().get("name", "")}
+
+        elif platform_id == "instagram":
+            import requests as _req
+            token = os.environ.get("INSTAGRAM_ACCESS_TOKEN", "")
+            acct  = os.environ.get("INSTAGRAM_ACCOUNT_ID", "")
+            r = _req.get(f"https://graph.facebook.com/v19.0/{acct}",
+                         params={"fields": "id,name,username", "access_token": token}, timeout=10)
+            r.raise_for_status()
+            return {"ok": True, "username": r.json().get("username", "")}
+
+        elif platform_id == "gmail":
+            creds_path = Path(os.environ.get("GMAIL_CREDENTIALS_PATH",
+                                             str(BASE_DIR / "credentials/gmail_credentials.json")))
+            if not creds_path.exists():
+                return {"ok": False, "error": f"Missing: {creds_path}"}
+            return {"ok": True}
+
+        elif platform_id in ("whatsapp", "bank"):
+            return {"ok": True, "note": "session-based, no pre-auth test available"}
+
+        else:
+            return {"ok": False, "error": f"Unknown platform: {platform_id}"}
+
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
 @app.websocket("/ws/live")
 async def websocket_live(websocket: WebSocket) -> None:
     await websocket.accept()
