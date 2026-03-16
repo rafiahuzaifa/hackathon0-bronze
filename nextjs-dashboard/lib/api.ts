@@ -1,7 +1,8 @@
 // api.ts — API client for AI Employee backend
 import type { DashboardStats, ApprovalItem, ActivityEvent, BotStatus, TaskFile, FinanceData } from './types';
 
-const BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+// Empty string = same-origin Next.js API routes (works on Vercel without separate backend)
+const BASE = process.env.NEXT_PUBLIC_API_URL || '';
 
 async function apiFetch<T>(path: string, opts: RequestInit = {}): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
